@@ -1,0 +1,77 @@
+name: Sync fork with upstream
+
+# Keeps this fork's default branch (and tags) current with the upstream repo.
+# Runs weekly, and can be triggered by hand from the Actions tab.
+#
+# Auth: set a repo secret named SYNC_TOKEN (PAT with `repo` + `workflow` scopes,
+# or fine-grained: Contents + Workflows read/write on this repo). Without it the
+# job falls back to GITHUB_TOKEN, which works until upstream changes anything
+# under .github/workflows/ -- GitHub refuses those pushes unless the token has
+# the `workflow` scope, and GITHUB_TOKEN can never have it.
+
+on:
+  schedule:
+    - cron: "17 6 * * 1" # Mondays 06:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+env:
+  UPSTREAM_REPO: nWave-ai/nWave
+  BRANCH: main
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out fork
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.BRANCH }}
+          fetch-depth: 0
+          token: ${{ secrets.SYNC_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Merge upstream into ${{ env.BRANCH }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add upstream "https://github.com/${UPSTREAM_REPO}.git"
+          git fetch --no-tags upstream "${BRANCH}"
+
+          behind=$(git rev-list --count "HEAD..upstream/${BRANCH}")
+          if [ "${behind}" -eq 0 ]; then
+            echo "Already up to date with ${UPSTREAM_REPO}@${BRANCH}." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          # Fast-forwards when the fork has no commits of its own; otherwise
+          # creates a merge commit (the fork carries this workflow file).
+          if ! git merge --no-edit -m "Merge ${UPSTREAM_REPO}@${BRANCH} into fork" "upstream/${BRANCH}"; then
+            git merge --abort || true
+            echo "::error::Merge conflict with ${UPSTREAM_REPO}@${BRANCH}. Resolve it locally: git fetch upstream && git merge upstream/${BRANCH}"
+            exit 1
+          fi
+
+          if ! git push origin "HEAD:${BRANCH}" 2>&1 | tee push.log; then
+            if grep -qi "workflow" push.log; then
+              echo "::error::Push rejected: upstream changed files under .github/workflows/, which GITHUB_TOKEN cannot push. Add a SYNC_TOKEN repo secret (PAT with 'repo' + 'workflow' scopes)."
+            fi
+            exit 1
+          fi
+          echo "Merged ${behind} upstream commit(s) from ${UPSTREAM_REPO}@${BRANCH}." | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Sync tags
+        run: |
+          set -uo pipefail
+          # Non-forced: tags already on the fork are never moved or deleted.
+          git fetch upstream "refs/tags/*:refs/tags/*" \
+            || echo "::warning::Some upstream tags clash with existing fork tags and were skipped."
+          git push origin --tags \
+            || echo "::warning::Some tags could not be pushed to the fork."
