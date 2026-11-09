@@ -11,7 +11,7 @@ disable-model-invocation: true
 
 You are reviewing DIVERGE wave artifacts. Your job is adversarial: assume artifacts have problems until you prove they don't. Flag issues before the team commits to a design direction.
 
-Four artifact files to review:
+Five artifact files to review:
 - `docs/feature/{id}/diverge/job-analysis.md`
 - `docs/feature/{id}/diverge/competitive-research.md`
 - `docs/feature/{id}/diverge/options-raw.md`
@@ -46,7 +46,7 @@ Four artifact files to review:
 
 ### Check 1.3 — Outcome Statement Quality
 
-**Requirement**: ODI-format outcome statements (Minimize + metric + object).
+**Requirement**: ODI-format outcome statements (direction + metric + object): Minimize, or Maximize when more is genuinely better.
 
 **FAIL signals**:
 - "Easy", "reliable", "good", "effective" in outcome statements
@@ -54,7 +54,7 @@ Four artifact files to review:
 - Compound statements with "and"/"or"
 - Future-intent framing: "would reduce"
 
-**PASS signal**: Each statement starts with "Minimize the [time/likelihood/effort]..." and is solution-agnostic.
+**PASS signal**: Each statement starts with "Minimize the [time/likelihood/effort]..." or a justified "Maximize the [metric]..." and is solution-agnostic.
 
 ---
 
@@ -96,8 +96,11 @@ Four artifact files to review:
 - Options cluster around one approach with minor variations
 - No option represents a radical simplification (SCAMPER "Eliminate")
 - No option inverts the workflow (SCAMPER "Reverse")
+- Most stated probability mass sits on options sharing one mechanism (head-clustering), or stated_probability is missing or not restated as one distribution over the curated six (summing to 1)
+- Fewer than two tail candidates (stated probability at most 0.2 within the distribution the candidate was drawn from) among the curated six, unless the single tail candidate's mechanism differs from every head candidate's
+- Any option missing name_origin (user-words or coined)
 
-**PASS signal**: Applying the 3-point diversity test to each pair of options — they differ in at least 2 of 3 dimensions (mechanism, assumption, cost).
+**PASS signal**: Applying the 3-point diversity test to each pair of the 6 curated options before DVF filtering — they differ in mechanism, assumption and cost profile. The stated probabilities (stated estimates, not measurements), restated as one distribution over the curated six, show no head-clustering: no single mechanism family holds most of the stated mass. At least two options are tail candidates, or the one tail candidate differs in mechanism from every head candidate. Every option carries name_origin. Documented DVF eliminations may reduce the surviving set.
 
 ### Check 3.2 — Generation Discipline
 
@@ -138,11 +141,11 @@ Four artifact files to review:
 **Requirement**: Weights locked before scoring begins; recommendation follows from scores.
 
 **FAIL signals**:
-- Recommendation contradicts the highest-scoring option without documented weight adjustment
+- Recommendation contradicts the highest-scoring option without a documented weight adjustment and consistent recalculation of all surviving options
 - Weights not specified in artifact
 - "This option feels right" language in recommendation without score grounding
 
-**PASS signal**: Recommended option has highest or second-highest weighted total; if second-highest, reason for not recommending top is documented.
+**PASS signal**: Recommended option has the highest weighted total in the current matrix. If weights change for an evidenced product reason or human decision, preserve that provenance, apply the revised weights to all surviving options and recalculate before recommending. A prose preference for the runner-up alone does not satisfy this check; retain it as dissent.
 
 ### Check 4.3 — Score Rubric Application
 
@@ -179,9 +182,11 @@ Four artifact files to review:
 
 **Requirement**: Recommendation ends with a clear decision statement for the DISCUSS wave.
 
-**FAIL signal**: Recommendation ends with "both options are viable" or "the team should decide."
+**FAIL signals**:
+- Recommendation ends with "both options are viable" or "the team should decide."
+- Decision statement uses a coined option handle, or vocabulary the requester never used, without marking it as new
 
-**PASS signal**: Explicit decision statement: "Proceed with [option], assuming [key risk] is acceptable."
+**PASS signal**: Explicit decision statement phrased by mechanism in the requester's vocabulary: "Proceed with [the mechanism], assuming [key risk] is acceptable." A coined handle appears only in the scoring table, marked with its name_origin.
 
 ---
 

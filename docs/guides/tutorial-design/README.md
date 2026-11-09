@@ -2,10 +2,16 @@
 
 **Time**: ~15 minutes (9 steps)
 **Platform**: macOS, Linux, or Windows
-**Prerequisites**: Python 3.10+, Claude Code with nWave installed, [Tutorial 6](../tutorial-discuss/) completed
+**Prerequisites**: Python 3.11+, Claude Code with nWave installed, [Tutorial 6](../tutorial-discuss/) completed
 **What this is**: An interactive walkthrough of `/nw-design` and `/nw-diagram` -- nWave's architecture design commands. You will turn requirements into a technical architecture with visual diagrams.
 
 ---
+
+> **Currency note (v4).** The commands this lesson teaches still exist, and
+> the session it walks still applies. The per-wave files and paths it shows
+> are 3.x artifacts: v4 records delivery work in one nwdes handoff
+> (`docs/feature/{id}/handoff.json`) and no wave writes `wave-decisions.md`.
+> See [Migrate from nWave 3.x](../migrating-from-3x.md).
 
 ## Verify you're ready
 
@@ -157,9 +163,9 @@ The design process has four phases: **codebase analysis** (check what exists), *
 
 > **If the reviewer finds issues**: Morgan fixes them automatically. This may take 1-2 iterations. You do not need to intervene unless Morgan asks a question.
 
-### Messages you can safely ignore
+### Read reported failures
 
-Lines containing `PreToolUse` or `DES_MARKERS` are internal quality gates -- normal operation, not errors.
+Inspect each refusal and its cause. A successful `nwdes design apply` builds the design artifacts; it does not establish design approval.
 
 **Verify the design completed** by checking that the architecture directory was created:
 

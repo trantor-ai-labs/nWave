@@ -2,10 +2,16 @@
 
 **Time**: ~15 minutes (7 steps)
 **Platform**: macOS or Linux (Windows: use WSL)
-**Prerequisites**: Python 3.10+, Claude Code with nWave installed, [Tutorials 1-3](../TUTORIALS.md) completed
+**Prerequisites**: Python 3.11+, Claude Code with nWave installed, [Tutorials 1-3](../TUTORIALS.md) completed
 **What this is**: An interactive walkthrough of `/nw-discover` -- nWave's product discovery command. You will validate a product idea before writing any code.
 
 ---
+
+> **Currency note (v4).** The command this lesson teaches still exists, and
+> the session it walks still applies. The per-wave files and paths it shows
+> are 3.x artifacts: v4 records delivery work in one nwdes handoff
+> (`docs/feature/{id}/handoff.json`) and no wave writes `wave-decisions.md`.
+> See [Migrate from nWave 3.x](../migrating-from-3x.md).
 
 ## What You'll Build
 

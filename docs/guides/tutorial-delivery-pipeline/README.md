@@ -7,6 +7,14 @@
 
 ---
 
+> **Currency note (v4).** This lesson explores the artifacts of the 3.x
+> delivery workflow. In v4, delivery runs through nwdes: one handoff per
+> feature (`docs/feature/{id}/handoff.json`) with rendered briefs and run
+> records; `roadmap.json` and `execution-log.json` were removed with no
+> converter. For current delivery, read [Deliver a
+> feature](../nwdes/deliver-feature.md) and
+> [Migrate from nWave 3.x](../migrating-from-3x.md).
+
 ## Verify you're ready
 
 This tutorial reads artifacts produced by `/nw-deliver` in Tutorial 1 (or 2). Before starting, `cd` into the project from that tutorial and confirm the following exist (replace `<feature-id>` with your feature ID, e.g. `image-to-ascii-art`):
@@ -240,7 +248,7 @@ Date:   ...
 Two things to notice:
 
 1. **Both test files and production files changed in the same commit** -- proof that tests and code were written together, not after the fact.
-2. **The Deterministic Execution System (DES) enforces every phase.** If the crafter tries to skip RED and jump straight to GREEN, the system blocks it.
+2. **The host observes the declared RED and GREEN runs.** nwdes builds delivery artifacts; it does not enforce phases. Read the command results rather than inferring the sequence from a summary.
 
 > **If you see more commits than expected**: The crafter may write multiple unit tests per step. Each step still produces exactly one commit at the end.
 
@@ -337,7 +345,7 @@ This evolution document contains a summary of the feature, the steps taken, qual
 | Who reviewed the code? | An independent reviewer on a separate model |
 | How do I know the tests are real? | Mutation testing -- 80%+ kill rate required |
 | How do I trace a decision? | Git log + roadmap step IDs |
-| Can the crafter skip steps? | No -- DES enforces every TDD phase |
+| Can the crafter skip steps? | The host must check the declared sequence and its execution evidence; the builder does not enforce phases |
 
 ---
 

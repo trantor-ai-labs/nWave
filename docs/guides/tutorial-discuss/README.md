@@ -2,10 +2,16 @@
 
 **Time**: ~17 minutes (9 steps)
 **Platform**: macOS, Linux, or Windows
-**Prerequisites**: Python 3.10+, Claude Code with nWave installed, [Tutorial 4](../tutorial-discovery/) completed (optionally [Tutorial 5: DIVERGE](../diverge-wave-guide/) for greenfield projects)
+**Prerequisites**: Python 3.11+, Claude Code with nWave installed, [Tutorial 4](../tutorial-discovery/) completed (optionally [Tutorial 5: DIVERGE](../diverge-wave-guide/) for greenfield projects)
 **What this is**: An interactive walkthrough of `/nw-discuss` -- nWave's requirements and UX journey command. You will turn a validated problem into structured user stories with acceptance criteria.
 
 ---
+
+> **Currency note (v4).** The command this lesson teaches still exists, and
+> the session it walks still applies. The per-wave files and paths it shows
+> are 3.x artifacts: v4 records delivery work in one nwdes handoff
+> (`docs/feature/{id}/handoff.json`) and no wave writes `wave-decisions.md`.
+> See [Migrate from nWave 3.x](../migrating-from-3x.md).
 
 ## Verify you're ready
 
