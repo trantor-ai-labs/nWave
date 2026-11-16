@@ -18,8 +18,6 @@ import sys
 from pathlib import Path
 from typing import NamedTuple
 
-from scripts.install.plugins.base import PluginResult
-
 
 _HASH_CHUNK_BYTES = 65536  # 64 KiB chunked read keeps SKILL.md etc. memory-bounded
 _LEGACY_CODEX_AGENT_ALIASES = {"nw-architect", "nw-crafter"}
@@ -198,7 +196,7 @@ try:
     from scripts.install.output_formatter import format_error
     from scripts.install.plugins.agents_plugin import AgentsPlugin
     from scripts.install.plugins.attribution_plugin import AttributionPlugin
-    from scripts.install.plugins.base import InstallContext
+    from scripts.install.plugins.base import InstallContext, PluginResult
     from scripts.install.plugins.codex_agents_plugin import (
         _CODEX_LEGACY_WITNESS_KEY,
         CodexAgentsPlugin,
@@ -210,14 +208,22 @@ try:
     from scripts.install.plugins.commands_plugin import CommandsPlugin
     from scripts.install.plugins.dev_launchers_plugin import DevLaunchersPlugin
     from scripts.install.plugins.devin_skills_plugin import DevinSkillsPlugin
+    from scripts.install.plugins.guard_extension import (
+        EXTENSION_NAME,
+        MANIFEST_NAME,
+        manifest_text,
+        render_guard_extension,
+    )
     from scripts.install.plugins.nwave_hooks_plugin import HooksPlugin
     from scripts.install.plugins.nwdes_plugin import NwdesPlugin
+    from scripts.install.plugins.nwstep_launcher_plugin import NwstepLauncherPlugin
     from scripts.install.plugins.omp_agents_plugin import OmpAgentsPlugin
     from scripts.install.plugins.omp_commands_plugin import OmpCommandsPlugin
     from scripts.install.plugins.omp_skills_plugin import OmpSkillsPlugin
     from scripts.install.plugins.opencode_agents_plugin import OpenCodeAgentsPlugin
     from scripts.install.plugins.opencode_commands_plugin import OpenCodeCommandsPlugin
     from scripts.install.plugins.opencode_skills_plugin import OpenCodeSkillsPlugin
+    from scripts.install.plugins.pi_guard_plugin import PiGuardExtensionPlugin
     from scripts.install.plugins.registry import PluginRegistry
     from scripts.install.plugins.skills_plugin import SkillsPlugin
     from scripts.install.plugins.templates_plugin import TemplatesPlugin
@@ -253,8 +259,7 @@ except ImportError:
     from installation_verifier import InstallationVerifier
     from output_formatter import format_error
     from plugins.agents_plugin import AgentsPlugin
-    from plugins.attribution_plugin import AttributionPlugin
-    from plugins.base import InstallContext
+    from plugins.base import InstallContext, PluginResult
     from plugins.codex_agents_plugin import (
         _CODEX_LEGACY_WITNESS_KEY,
         CodexAgentsPlugin,
@@ -266,14 +271,22 @@ except ImportError:
     from plugins.commands_plugin import CommandsPlugin
     from plugins.dev_launchers_plugin import DevLaunchersPlugin
     from plugins.devin_skills_plugin import DevinSkillsPlugin
+    from plugins.guard_extension import (
+        EXTENSION_NAME,
+        MANIFEST_NAME,
+        manifest_text,
+        render_guard_extension,
+    )
     from plugins.nwave_hooks_plugin import HooksPlugin
     from plugins.nwdes_plugin import NwdesPlugin
+    from plugins.nwstep_launcher_plugin import NwstepLauncherPlugin
     from plugins.omp_agents_plugin import OmpAgentsPlugin
     from plugins.omp_commands_plugin import OmpCommandsPlugin
     from plugins.omp_skills_plugin import OmpSkillsPlugin
     from plugins.opencode_agents_plugin import OpenCodeAgentsPlugin
     from plugins.opencode_commands_plugin import OpenCodeCommandsPlugin
     from plugins.opencode_skills_plugin import OpenCodeSkillsPlugin
+    from plugins.pi_guard_plugin import PiGuardExtensionPlugin
     from plugins.registry import PluginRegistry
     from plugins.skills_plugin import SkillsPlugin
     from plugins.templates_plugin import TemplatesPlugin
@@ -436,8 +449,8 @@ OMP_GUARD_CEILING = (
 )
 
 _OMP_HOOKS_TEMPLATE = "omp-nwave-hooks-extension.ts.template"
-_OMP_HOOKS_SHIM = "nwave-hooks.ts"
-_OMP_HOOKS_MANIFEST = ".nwave-des-manifest.json"
+_OMP_HOOKS_SHIM = EXTENSION_NAME
+_OMP_HOOKS_MANIFEST = MANIFEST_NAME
 
 
 def _install_omp_hooks_extension(context) -> "PluginResult":
@@ -449,7 +462,6 @@ def _install_omp_hooks_extension(context) -> "PluginResult":
     rendered extension and a sha256 manifest under omp_extensions_dir();
     honours context.dry_run.
     """
-    import hashlib
     import subprocess
 
     from scripts.shared.install_paths import (
@@ -493,10 +505,8 @@ def _install_omp_hooks_extension(context) -> "PluginResult":
     template = context.framework_source / "templates" / _OMP_HOOKS_TEMPLATE
     if not template.is_file():
         template = context.project_root / "nWave/templates" / _OMP_HOOKS_TEMPLATE
-    rendered = (
-        template.read_text(encoding="utf-8")
-        .replace("{{PYTHON_PATH_JSON}}", json.dumps(python))
-        .replace("{{PYTHONPATH_JSON}}", json.dumps(runtime))
+    rendered = render_guard_extension(
+        template.read_text(encoding="utf-8"), python, runtime
     )
     directory = omp_extensions_dir()
     shim = directory / _OMP_HOOKS_SHIM
@@ -530,17 +540,7 @@ def _install_omp_hooks_extension(context) -> "PluginResult":
                 return PluginResult(False, name, message, errors=[message])
         directory.mkdir(parents=True, exist_ok=True)
         shim.write_text(rendered, encoding="utf-8")
-        manifest_path.write_text(
-            json.dumps(
-                {
-                    "installed_extensions": [_OMP_HOOKS_SHIM],
-                    "sha256": hashlib.sha256(rendered.encode()).hexdigest(),
-                },
-                indent=2,
-            )
-            + "\n",
-            encoding="utf-8",
-        )
+        manifest_path.write_text(manifest_text(rendered), encoding="utf-8")
     message = (
         f"{'Would install' if context.dry_run else 'Installed'} OMP nWave hooks "
         f"extension at {shim}; Python: {python}; runtime: {runtime}. "
@@ -1595,6 +1595,9 @@ class NWaveInstaller:
             omp_agents.set_dependencies(["omp-skills"])
             registry.register(omp_agents)
             registry.register(OmpCommandsPlugin())
+        # pi.dev loads its tool_call guard from <agent dir>/extensions/ (pi 1.5.2 docs).
+        if target_platforms and "pi" in target_platforms:
+            registry.register(PiGuardExtensionPlugin())
         # Devin CLI plugins. Every public skill is installed, including the
         # user-invocable command-skills (equivalent to Claude Code commands).
         # Skills are discovered as /devin:nw-* slash commands (confirmed via
@@ -1613,6 +1616,11 @@ class NWaveInstaller:
         if target_platforms and "devin" in target_platforms:
             registry.register(DevinSkillsPlugin())
         registry.register(NwdesPlugin())
+        # The nwstep launcher is private development tooling, so only a development
+        # install names it in the registry. Its priority (99 < 100) runs it before the
+        # dev launchers, whose environment verdict must not suppress this write.
+        if self.dev_mode:
+            registry.register(NwstepLauncherPlugin())
         if self.dev_mode and not self.dry_run:
             registry.register(DevLaunchersPlugin())
         return registry
@@ -1882,6 +1890,12 @@ class NWaveInstaller:
         with self.logger.progress_spinner("  🚧 Work in progress..."):
             # Execute all plugins through registry
             results = registry.install_all(context)
+
+        # A non-dev install removes the dev-only nwstep launcher a previous dev install
+        # wrote (review N4). The launcher is not in the production registry, so this one
+        # call runs it outside the registry, as the OMP guard extension below does.
+        if not self.dev_mode:
+            results["nwstep-launcher"] = NwstepLauncherPlugin().install(context)
 
         # The OMP guard extension is installed outside the registry: its kept
         # template needs the resolved interpreter and host-neutral runtime.
@@ -2291,6 +2305,57 @@ def show_title_panel(logger: Logger, dry_run: bool = False) -> None:
     logger.print_styled("")
 
 
+# Reloadable hosts in display order: (platform, label, what the reopen loads).
+_RELOAD_HOSTS: tuple[tuple[str, str, str], ...] = (
+    ("claude_code", "Claude Code", "agents, skills, and commands"),
+    ("codex", "Codex", "agents and skills"),
+    ("opencode", "OpenCode", "agents, skills, and commands"),
+    ("cursor", "Cursor", "hooks"),
+    ("copilot", "GitHub Copilot", "hooks"),
+    ("devin", "Devin", "skills"),
+)
+
+
+def restart_hint_lines(target_platforms: set[str] | frozenset[str] | None) -> list[str]:
+    """Return the restart and next-step lines for the hosts actually installed.
+
+    Each installed reloadable host gets its own reopen line, and Claude Code is
+    named only when ``claude_code`` is among the targets. ``None`` is the legacy
+    single-target call without a platform list, which always meant a Claude Code
+    install, so it keeps that default.
+    """
+    if target_platforms is None:
+        hosts = frozenset({"claude_code"})
+    else:
+        hosts = frozenset(target_platforms)
+    lines: list[str] = []
+    for platform, label, loads in _RELOAD_HOSTS:
+        if platform in hosts:
+            lines.append(f"  ⚠️  Quit and reopen {label} to load the new {loads}.")
+    if hosts == frozenset({"codex"}):
+        lines.append("  💡 In the activated project, ask $nw-buddy what to do first.")
+    elif {"claude_code", "codex"} <= hosts:
+        lines.append(
+            "  💡 In the activated project, ask /nw-buddy in Claude Code or $nw-buddy in Codex."
+        )
+    elif "claude_code" in hosts or hosts == frozenset({"omp"}):
+        lines.append("  💡 In the activated project, ask /nw-buddy what to do first.")
+    if "omp" in hosts:
+        lines.append(
+            "  ⚠️  Quit and reopen OMP to load agents, skills, commands and the tool_call guard extension."
+        )
+        lines.append(
+            "  💡 In OMP, dispatch nw-* task agents via Task, or invoke /skill:nw-<name>."
+        )
+        lines.append(f"  ⚠️  {OMP_GUARD_CEILING}")
+    if "pi" in hosts:
+        lines.append("  ⚠️  Restart pi to load the nWave tool_call guard extension.")
+        lines.append(
+            "  ⚠️  The pi guard has not been run in a live pi session here; check one blocked write after pi loads it."
+        )
+    return lines
+
+
 def show_installation_summary(
     logger: Logger,
     target_dir: Path | None = None,
@@ -2339,33 +2404,8 @@ def show_installation_summary(
     project_cli = shlex.quote(str(cli_entry)) if cli_entry.is_file() else "nwave-ai"
     logger.info(f"  💡 In the target Git project, run: {project_cli} project enable")
     logger.info(f"  💡 Check activation: {project_cli} project status")
-    omp_selected = bool(target_platforms and "omp" in target_platforms)
-    if codex_only:
-        logger.info("  ⚠️  Quit and reopen Codex to load the new agents and skills.")
-        logger.info("  💡 In the activated project, ask $nw-buddy what to do first.")
-    elif mixed_hosts:
-        logger.info(
-            "  ⚠️  Quit and reopen Claude Code to load the new agents, skills, and commands."
-        )
-        logger.info("  ⚠️  Quit and reopen Codex to load the new agents and skills.")
-        logger.info(
-            "  💡 In the activated project, ask /nw-buddy in Claude Code or $nw-buddy in Codex."
-        )
-    elif omp_selected and target_platforms == frozenset({"omp"}):
-        logger.info("  💡 In the activated project, ask /nw-buddy what to do first.")
-    else:
-        logger.info(
-            "  ⚠️  Quit and reopen Claude Code to load the new agents, skills, and commands."
-        )
-        logger.info("  💡 In the activated project, ask /nw-buddy what to do first.")
-    if omp_selected:
-        logger.info(
-            "  ⚠️  Quit and reopen OMP to load agents, skills, commands and the tool_call guard extension."
-        )
-        logger.info(
-            "  💡 In OMP, dispatch nw-* task agents via Task, or invoke /skill:nw-<name>."
-        )
-        logger.info(f"  ⚠️  {OMP_GUARD_CEILING}")
+    for line in restart_hint_lines(target_platforms):
+        logger.info(line)
     logger.info("  📚 Docs: https://github.com/nWave-ai/nWave")
 
 
@@ -2384,6 +2424,7 @@ _HOST_PLATFORMS: tuple[tuple[str, str, str], ...] = (
     ("copilot", "copilot", "hooks only"),
     ("omp", "omp", "agents, skills, /nw-* commands and the tool_call guard extension"),
     ("devin", "devin", "skills only"),
+    ("pi", "pi", "nWave tool_call guard extension only (pi.dev)"),
 )
 _PLATFORM_CHOICES: tuple[tuple[str, frozenset[str] | None, str], ...] = (
     ("auto", None, "detect installed hosts; refuses when none is found"),

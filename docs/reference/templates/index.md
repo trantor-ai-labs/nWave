@@ -17,6 +17,7 @@
 | architect-handoff/po.discuss-v1.tmpl | handoff prompt | nwdes handoff prompt po.discuss (version 1) |
 | architect-handoff/review.atd-v1.tmpl | handoff prompt | nwdes handoff prompt review.atd (version 1) |
 | architect-handoff/review.craft-v1.tmpl | handoff prompt | nwdes handoff prompt review.craft (version 1) |
+| architect-handoff/review.design-v1.tmpl | handoff prompt | nwdes handoff prompt review.design (version 1) |
 | beta-project-agents-section.md | markdown | nWave (beta) — How to Work in This Project |
 | beta-project-claude-section.md | markdown | nWave (beta) — How to Work in This Project |
 | delivery-route-fragment.md | markdown | Three routes are open to a Request: |
@@ -28,6 +29,7 @@
 | nwave-complete-methodology.yaml | unknown | Comprehensive orchestration template for complete nWave methodology execution with full ATDD integration |
 | omp-nwave-hooks-extension.ts.template | install template | import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent"; |
 | opencode-nwave-hooks-plugin.ts.template | install template | /** |
+| pi-nwave-hooks-extension.ts.template | install template | import { spawn } from "node:child_process"; |
 | polyglot/csharp/FeatureScenarios.cs.template | install template | Gojko Adzic Pillars 1+2: |
 | polyglot/csharp/FeatureSpecifications.cs.template | install template | Responsibilities: |
 | polyglot/csharp/StateDelta.cs.template | install template | StateDelta.cs — C# port of nwave_ai.state_delta (Python canonical). |

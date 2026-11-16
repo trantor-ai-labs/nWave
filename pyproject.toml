@@ -25,6 +25,9 @@ packages = ["nwave_ai"]
 "scripts/validate_step_file.py" = "scripts/validate_step_file.py"
 "src/nwdes" = "nwdes"
 "src/codefact" = "codefact"
+"scripts/dev/nwstep/src" = "scripts/dev/nwstep/src"
+"scripts/dev/nwstep/templates" = "scripts/dev/nwstep/templates"
+"scripts/dev/nwstep/schemas" = "scripts/dev/nwstep/schemas"
 "src/nwave_capture" = "nwave_capture"
 
 [tool.hatch.build.hooks.custom]
@@ -32,7 +35,7 @@ path = "scripts/release/offline_wheelhouse_hook.py"
 
 [project]
 name = "nwave-ai"
-version = "4.3.0"
+version = "4.6.0"
 description = "Modern CLI installer for nwave with rich terminal UI"
 readme = "README.md"
 license = {text = "MIT"}
@@ -68,11 +71,11 @@ classifiers = [
 
 dependencies = [
     "rich>=13.7.0",
-    "typer>=0.27.3",
-    "pydantic>=2.14.2",
+    "typer>=0.29.0",
+    "pydantic>=2.14.3",
     "pydantic-settings>=2.16.2",
     "httpx>=0.27.0",
-    "platformdirs>=4.14.3",
+    "platformdirs>=4.14.5",
     "pyyaml>=6.0",
     "packaging>=26.3",
     "typing_extensions>=4.16.0",
@@ -109,13 +112,13 @@ dev = [
     "allure-pytest>=2.16.2",
     "respx>=0.20.0",
     "hypothesis>=6.170.14",
-    "markdown-it-py>=4.2.0",
+    "markdown-it-py>=4.3.0",
     # Mutation testing
-    "cosmic-ray>=8.7.0",
+    "cosmic-ray>=8.9.0",
     "mutmut==3.8.1",
     # Linting & formatting
     "mypy>=2.4.1",
-    "ruff==0.17.3",
+    "ruff==0.17.4",
     "bandit[toml]>=1.9.4",
     "detect-secrets>=1.4.0",
     # Git & release
@@ -128,13 +131,13 @@ dev = [
     "aiohttp>=3.14.5",
     "multidict>=7.2.1",
     "certifi>=2026.10.23",
-    "filelock>=4.2.7",
+    "filelock>=4.2.10",
     # Task runner (replaces Pipfile [scripts]; run via `uv run poe <task>`)
     "poethepoet>=0.49.0",
     # Utilities
     "fpdf2>=2.9.0",
     "pillow>=13.0.0",
-    "click>=8.5.0",
+    "click>=8.5.1",
     "colorama>=0.4.0",
     "tqdm>=4.70.1",
     # Token measurement (advisory, dev-only) — DDD-1
@@ -164,6 +167,7 @@ Repository = "https://github.com/nWave-ai/nWave"
 Issues = "https://github.com/nWave-ai/nWave/issues"
 
 [project.scripts]
+nwstep = "scripts.shared.nwstep_entry:main"
 nwave-ai = "nwave_ai.cli:main"
 nwdes = "nwdes.shell.cli:main"
 code-fact = "codefact.shell.cli:main"
@@ -331,6 +335,11 @@ disallow_untyped_defs = false
 target-version = "py311"
 line-length = 88
 src = ["src", "tests"]
+# The development tool under scripts/dev is third-party-style
+# experimental code copied as is; it predates this contract and is not
+# rewritten to satisfy it (format has no per-file-ignores mechanism, so a
+# whole-tree exclude is the only switch that covers both check and format).
+extend-exclude = ["scripts/dev/nwstep"]
 [tool.ruff.lint]
 select = [
     "E",      # pycodestyle errors
@@ -442,7 +451,7 @@ line-ending = "auto"
 [tool.commitizen]
 # WARNING: the tool.commitizen.version is tracking the LAST STABLE version and is updated by the pipeline!
 # DON'T TOUCH IT!
-version = "4.3.0"
+version = "4.6.0"
 version_scheme = "pep440"
 version_files = [
     "nWave/VERSION",
@@ -499,3 +508,7 @@ verify-hooks     = "python scripts/validation/verify_hooks.py"  # fails loudly u
 # Root board (dev only): `board` refreshes the Backlog.md view of the todo and serves
 # the web board.
 board            = "python scripts/dev/nwboard.py kanban"
+# Development tool (dev only): run it with `uv run poe <task>`.
+[tool.poe.tasks.nwstep]
+cmd = "python -m nwstep"
+env = { PYTHONPATH = "scripts/dev/nwstep/src" }

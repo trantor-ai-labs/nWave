@@ -44,7 +44,7 @@ narrative.
    current design payload; do not create a parallel operational authority.
 7. When independent operational review is selected, follow `nw-role-invocation`'s selected-review branch: the native caller invokes `nw-platform-architect-reviewer` on the current constructed authority, bound facts, scope and observations, then consumes its actual result. Keep review outside the closed constructor JSON. Required revisions return to the platform authority owner; construction alone is not completion of an enabled selected review. No unselected review turn or live rollout is implied.
 
-DEVOPS does not author a handover, feature workspace, rollout ledger or CI
+DEVOPS does not author a handover, feature directory, rollout ledger or CI
 status copy. A downstream operational contradiction returns to the platform
 authority; software re-derives any needed execution facts.
 
@@ -53,6 +53,8 @@ authority; software re-derives any needed execution facts.
 Keep platform review replies verbatim. The host invokes models, runs native
 checks and retains actual output. Declared operational facts and rendered
 documents do not deploy or verify infrastructure.
+
+Guidance, not enforced by nwdes: when a design declares an auto-deploy target, the architect should record in the shared DESIGN constraint the target, its trigger and its health endpoint, and should record as a slice `verification` command a deploy probe the host can run against that target or a faithful mirror. nwdes does not check that the probe ran or that its output exists; a close with `--outcome indeterminate --diagnostic TEXT` that names the missing probe is the honest outcome when it cannot run.
 
 Before creating or inheriting a lane, or finalizing/resuming cleanup, apply
 the worktree lifecycle in `nw-throughput`. The feature's handoff and product

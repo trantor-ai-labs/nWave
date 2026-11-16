@@ -13,6 +13,8 @@ from types import MappingProxyType
 
 from nwdes import policy as role_policy
 from nwdes import prose
+from nwdes.citation.citation import Citation
+from nwdes.citation.verdict import CouldNotVerify, Resolved, Unresolved
 from nwdes.contracts import Built, Defect, Refused, checked
 
 
@@ -760,7 +762,8 @@ ACCEPTANCE_ROW = record(
     user_result=TEXT,
     disposition=choice(
         Tested=record(
-            ("test",),
+            ("test_path",),
+            test_path=LINE,
             test=LINE,
             still_passes_if=TEXT,
             obligations=array(OBLIGATION),
@@ -790,7 +793,16 @@ ACCEPTANCE_SHAPE = replace(
 
 EXPECTATIONS = record(
     rows=array(
-        record(("text",), identity="E", promises=array(PROMISE_REFERENCE), text=TEXT)
+        record(
+            ("text",),
+            identity="E",
+            promises=array(PROMISE_REFERENCE),
+            text=TEXT,
+            lacuna=TEXT,
+            blocking=enum("yes", "no"),
+            isolated=enum("yes", "no"),
+            needs=TEXT,
+        )
     )
 )
 CHARTER = record(
@@ -819,8 +831,14 @@ VERDICT = choice(
                 "product_violation",
                 "expectation_defect",
                 "observation_gap",
+                "unstable",
             )
         },
+    ),
+    not_examined=record(
+        ("reason",),
+        required_error=RequiredError.PartInvalid,
+        reason=TEXT,
     ),
 )
 OBSERVATION_REFERENCE = Spec("draft_reference", ("O",))
@@ -1671,6 +1689,48 @@ def _stored_requirements(raw, facts):
         *_design_requirements(raw.get("design")),
         *_acceptance_requirements(raw.get("acceptance"), facts),
         *_disposition_requirements(raw, facts),
+        *_retired_citation_defects(raw.get("acceptance")),
+    )
+
+
+def _retired_citation_defects(acceptance):
+    """A Tested row still in the retired path::name form. No verb opens a published record in that form,
+    so the refusal names the one manual edit that makes the row current; nwdes cannot make it."""
+    if not isinstance(acceptance, Mapping):
+        return ()
+    return tuple(
+        Defect(
+            f"RetiredCitation: acceptance.{identity}[{index}].disposition.test",
+            "The Tested row names its test in the retired path::name form, which this version does not read. "
+            "nwdes cannot open or repair a published record in that form, so the edit is made by hand.",
+            f"Edit the published handoff file: in acceptance.{identity}[{index}].disposition replace the test "
+            'value with test_path (the text before "::") and test (the text after "::"), keep still_passes_if, '
+            "then run nwdes acceptance open --from-current again.",
+        )
+        for identity, rows in acceptance.items()
+        if isinstance(rows, (tuple, list))
+        for index, row in enumerate(rows)
+        if _is_retired_citation(row)
+    )
+
+
+def _is_retired_citation(row):
+    disposition = row.get("disposition") if isinstance(row, Mapping) else None
+    return (
+        isinstance(disposition, Mapping)
+        and disposition.get("kind") == "Tested"
+        and "test_path" not in disposition
+        and isinstance(disposition.get("test"), str)
+        and "::" in disposition["test"]
+    )
+
+
+def _retired_row_gaps(acceptance):
+    """The generic MissingFact of each retired row's own test_path. The RetiredCitation of that row states
+    the repair, so only this gap is left out; an unrelated row's gap is reported as before."""
+    return frozenset(
+        "MissingFact: " + defect.what.removeprefix("RetiredCitation: ") + "_path"
+        for defect in _retired_citation_defects(acceptance)
     )
 
 
@@ -1749,19 +1809,29 @@ def _binds_obligations(row):
     )
 
 
-def coverage_locators(verb, output, previous):
-    """The test locators the coverage rule reads: those of the Tested rows that bind obligations, stored and newly produced."""
+def citation_of(row):
+    """The citation a Tested row names: its test file and, when given, its test name; None for other rows."""
+    disposition = _mapping(row.get("disposition"))
+    test_path = disposition.get("test_path")
+    if disposition.get("kind") != "Tested" or not isinstance(test_path, str):
+        return None
+    test = disposition.get("test")
+    return Citation(test_path, test if isinstance(test, str) else None)
+
+
+def coverage_citations(verb, output, previous):
+    """The citations the coverage rule reads: those of the Tested rows that bind obligations, stored and newly produced."""
     if verb != "acceptance":
         return ()
     stored = previous.part("acceptance") if isinstance(previous, HandoffInput) else None
     row_sets = (*_mapping(stored).values(), _sequence(getattr(output, "payload", None)))
-    locators = (
-        _mapping(row.get("disposition")).get("test")
+    citations = (
+        citation_of(row)
         for rows in row_sets
         for row in _tested_rows(rows)
         if _binds_obligations(row)
     )
-    return tuple(dict.fromkeys(a for a in locators if isinstance(a, str)))
+    return tuple(dict.fromkeys(c for c in citations if c is not None))
 
 
 def _coverage_records(design):
@@ -1937,18 +2007,37 @@ def _obligation_defects(design, previous, acceptance, slice, resolution):
                     f"Record a Tested row of {slice} whose obligations list {key}, with the test that observes it.",
                 )
             )
-        elif _generative_key(index, key) and not any(
-            resolution.get(_mapping(row.get("disposition")).get("test")) is True
-            for _, row, _ in bound
-        ):
-            defects.append(
-                Defect(
-                    f"UnresolvedTest: {key} cites {_mapping(bound[0][1].get('disposition')).get('test')}",
-                    f"{key} is a broad law and no test bound to it resolves to a generative test that exists.",
-                    f"Cite a test of the form path::name whose name occurs as a whole word in a readable file under the repository root, and record it in the Tested row binding {key}.",
-                )
-            )
+        elif _generative_key(index, key):
+            verdicts = tuple(resolution.get(citation_of(row)) for _, row, _ in bound)
+            # An unverifiable citation blocks the close whatever the other rows resolve to (DEC2).
+            if any(
+                isinstance(verdict, CouldNotVerify) for verdict in verdicts
+            ) or not any(isinstance(verdict, Resolved) for verdict in verdicts):
+                defects.append(_citation_defect(key, verdicts))
     return tuple(defects)
+
+
+def _citation_defect(key, verdicts):
+    """The refusal for a Broad law whose bound citations are not confirmed: could-not-verify when the
+    tool cannot read a cited file, otherwise unresolved with the verdict's reason."""
+    unverifiable = next((v for v in verdicts if isinstance(v, CouldNotVerify)), None)
+    if unverifiable is not None:
+        return Defect(
+            f"CouldNotVerify: {key} cites {unverifiable.citation.describe()}",
+            f"the tool cannot read the cited file as text under the repository root: {unverifiable.reason}. "
+            "A citation the tool cannot read is neither a missing test nor a confirmed one, so the close waits for it.",
+            f"Cite a test_path that is a UTF-8 text file under the repository root, with its test name as the test field, "
+            f"in the Tested row binding {key}.",
+        )
+    verdict = next((v for v in verdicts if isinstance(v, Unresolved)), None)
+    cited = "no cited file" if verdict is None else verdict.citation.describe()
+    reason = "no citation of it was checked" if verdict is None else verdict.reason
+    return Defect(
+        f"UnresolvedTest: {key} cites {cited}",
+        f"{key} is a broad law and no test bound to it is confirmed: {reason}.",
+        f"Cite the file that declares the generated test as test_path and its name as test, the name "
+        f"occurring as a whole word in that file; record both in the Tested row binding {key}.",
+    )
 
 
 def _generative_key(index, key):
@@ -3726,6 +3815,16 @@ class InvocationRefused(Refused):
     output: RoleInput | None = None
 
 
+def _not_accepted_remedy(kind):
+    """The HOW of a refused non-accepted output. An examine close publishes only with --outcome accepted."""
+    if kind == "examine":
+        return (
+            "Close with --outcome accepted: nwdes publishes the outcome the verdicts derive. "
+            "To change it, change a verdict first."
+        )
+    return "Resolve the role's diagnostic, record corrected values with its verbs and close with --outcome accepted."
+
+
 def inspect_output(kind, data, *, policy=None, resolution=EMPTY):
     parsed = parse_json(data, kind)
     if isinstance(parsed, Refused):
@@ -3768,7 +3867,7 @@ def inspect_output(kind, data, *, policy=None, resolution=EMPTY):
                 Defect(
                     f"RoleNotAccepted: {kind}",
                     str(envelope.get("diagnostic", "")),
-                    "Resolve the role's diagnostic, record corrected values with its verbs and close with --outcome accepted.",
+                    _not_accepted_remedy(kind),
                 ),
             )
             if outcome in ("rejected", "indeterminate")
@@ -3803,7 +3902,7 @@ def inspect_output(kind, data, *, policy=None, resolution=EMPTY):
 
 
 def _expectation_set_problems(previous, action):
-    """Revise needs a fixed set; apply over a fixed set replaces it."""
+    """Revise needs a fixed set; a fixed row never changes, see _expectation_row_problems."""
     return (
         (
             Defect(
@@ -3814,6 +3913,108 @@ def _expectation_set_problems(previous, action):
         )
         if action == "revise" and previous.expectations is None
         else ()
+    )
+
+
+_EXPECTATION_TEXT_FIELDS = ("text", "lacuna", "needs")
+
+
+def _row_content(row, resolve):
+    """What a row says, so a row is kept only when nothing it says changed.
+
+    `blocking` is absent for a blocking row and `isolated` for a sequential one; an absent
+    flag reads as its default, so a row that states the default is the same row.
+    """
+    return (
+        tuple(sorted(row.get("promises", ()))),
+        tuple(resolve(row.get(name)) for name in _EXPECTATION_TEXT_FIELDS),
+        row.get("blocking", "yes"),
+        row.get("isolated", "no"),
+    )
+
+
+def _fact_text(facts):
+    return lambda value: None if value is None else facts.get(value, value)
+
+
+def _lacuna_given(row):
+    lacuna = row.get("lacuna")
+    return isinstance(lacuna, str) and lacuna.strip() != ""
+
+
+def _readable(row, resolve):
+    """A published row whose texts resolve to text can be compared; a damaged one cannot.
+
+    A damaged previous row is unavailable, so the checks that read it stay silent while the
+    healthy rows still answer for themselves.
+    """
+    texts = [resolve(row.get(name)) for name in _EXPECTATION_TEXT_FIELDS]
+    return all(
+        value is None or isinstance(value, str) for value in texts
+    ) and isinstance(texts[0], str)
+
+
+def _withdrawable(previous, identity):
+    """A fixed row leaves the set only with the current verdict unmet as expectation_defect."""
+    verdict = (previous.examination or {}).get(identity) or {}
+    return verdict.get("verdict") == "unmet" and verdict.get("class") == (
+        "expectation_defect"
+    )
+
+
+def _expectation_row_problems(previous, payload):
+    """Fixed rows are append-only; a new or changed row states a lacuna.
+
+    A row keeps its id and its content until it is withdrawn. A row without an id takes the
+    next expectation number, which the counter keeps monotone. Pure over its inputs.
+    """
+    kept = {row["id"]: row for row in (previous.expectations or {}).get("rows", ())}
+    resolve_fact = _fact_text(previous.facts)
+    stated = {}
+    issued = previous.counters.get("E", 0)
+    for row in payload.get("rows", ()):
+        identity = row.get("id")
+        if identity is None:
+            issued += 1
+            identity = f"E{issued}"
+        stated[identity] = row
+    problems = []
+    for identity, row in stated.items():
+        if not _readable(row, _same):
+            continue
+        before = kept.get(identity)
+        if before is None:
+            if not _lacuna_given(row):
+                problems.append(
+                    Defect(
+                        "EmptyLacuna: " + identity,
+                        f"The expectation row {identity} states no lacuna. WHY: without a lacuna the row repeats the oracle of its promise.",
+                        "Say what the oracle of its promise does not see, with nwdes expectations row add --lacuna TEXT; a lacuna is required for each new or changed row.",
+                    )
+                )
+        elif _readable(before, resolve_fact) and _row_content(
+            row, _same
+        ) != _row_content(before, resolve_fact):
+            problems.append(_row_rewritten(identity))
+    for identity, before in kept.items():
+        if (
+            identity not in stated
+            and _readable(before, resolve_fact)
+            and not _withdrawable(previous, identity)
+        ):
+            problems.append(_row_rewritten(identity))
+    return tuple(problems)
+
+
+def _same(value):
+    return value
+
+
+def _row_rewritten(identity):
+    return Defect(
+        "RowRewritten: " + identity,
+        f"The fixed row {identity} changed or left the set. WHY: fixed rows are append-only; a row's content stays identical once published.",
+        f"Keep {identity} unchanged. It may leave the set only after its current verdict is unmet as expectation_defect; otherwise add a new row with nwdes expectations row add.",
     )
 
 
@@ -3874,28 +4075,24 @@ def uncited_verdict(expectation):
 def examination_verdicts(payload):
     observations = {row["id"]: row["text"] for row in payload["observations"]}
     return Record(
+        (expectation, Record(_published_fields(verdict, observations)))
+        for expectation, verdict in payload["verdicts"].items()
+    )
+
+
+def _published_fields(verdict, observations):
+    if verdict.get("verdict") == "not_examined":
+        return tuple(verdict.items())
+    return (
+        *((name, value) for name, value in verdict.items() if name != "observations"),
         (
-            expectation,
-            Record(
-                (
-                    *(
-                        (name, value)
-                        for name, value in verdict.items()
-                        if name != "observations"
-                    ),
-                    (
-                        "observations",
-                        tuple(
-                            dict.fromkeys(
-                                observations[identity]
-                                for identity in verdict["observations"]
-                            )
-                        ),
-                    ),
+            "observations",
+            tuple(
+                dict.fromkeys(
+                    observations[identity] for identity in verdict["observations"]
                 )
             ),
-        )
-        for expectation, verdict in payload["verdicts"].items()
+        ),
     )
 
 
@@ -3917,7 +4114,9 @@ def examination_observation_problems(payload):
         *(
             uncited_verdict(identity)
             for identity, verdict in verdicts.items()
-            if isinstance(verdict, Mapping) and not verdict.get("observations")
+            if isinstance(verdict, Mapping)
+            and verdict.get("verdict") != "not_examined"
+            and not verdict.get("observations")
         ),
         *(
             Defect(
@@ -3988,11 +4187,42 @@ def _examination_problems(previous, decoded):
 
 
 def examination_outcome(verdicts):
-    """Derive the outcome of a constructed total verdict set, never judge its evidence."""
-    return (
-        "accepted"
-        if all(verdict["verdict"] == "met" for verdict in verdicts.values())
-        else "rejected"
+    """Derive the outcome of a constructed verdict set, never judge its evidence.
+
+    The most serious state decides: an unmet row (FAIL or UNSTABLE) rejects, a row that was
+    not examined (declared by the examiner with a reason) is indeterminate, and only an all-met set is accepted.
+    """
+    states = {verdict["verdict"] for verdict in verdicts.values()}
+    if "unmet" in states:
+        return "rejected"
+    if "not_examined" in states:
+        return "indeterminate"
+    return "accepted"
+
+
+def examination_close_refusal(draft, outcome, diagnostic):
+    """The refusal of an examine close that asks for an outcome nwdes does not publish.
+
+    An examination publishes whatever its verdicts derive: a close with --outcome accepted
+    publishes that derived outcome and prints it. A close asking for another outcome is refused
+    here, naming the outcome the verdicts derive and the one close that publishes it. The
+    author's supplied diagnostic is carried in the refusal, never dropped.
+    """
+    derived = examination_outcome(draft.get("verdicts") or {})
+    why = (
+        f"--outcome {outcome} was given; nwdes publishes only the outcome the verdicts derive, "
+        f"and the verdicts derive {derived}."
+    )
+    if diagnostic:
+        why += " The author's diagnostic, verbatim, one quoted line per row:" + "".join(
+            f"\n  | {line}" for line in diagnostic.splitlines()
+        )
+    return Defect(
+        "RoleNotAccepted: examine",
+        why,
+        "Close with --outcome accepted. nwdes publishes the outcome the verdicts derive, "
+        f"which is {derived}, and prints it as the last line of the close output. To change that outcome, "
+        "change a verdict first: met, unmet or not_examined.",
     )
 
 
@@ -4271,6 +4501,35 @@ def _design_commands(payload):
     )
 
 
+def confirmed_decision_texts(product, facts):
+    """The text of each Confirmed product decision, resolved through the facts it names."""
+    return tuple(
+        (facts or {}).get(row.get("text"), row.get("text"))
+        for row in ((product or EMPTY).get("decisions") or ())
+        if (row.get("status") or EMPTY).get("kind") == "Confirmed"
+    )
+
+
+def uncarried_confirmed_decisions(stored):
+    """Texts of Confirmed product decisions that no shared design constraint carries verbatim.
+
+    A report, not a gate: the design still closes. Both sides are resolved through the stored
+    facts, so interned identities compare as their text.
+    """
+    facts = stored.get("facts") or {}
+    carried = {
+        facts.get(row.get("text"), row.get("text"))
+        for row in (
+            ((stored.get("design") or {}).get("shared") or {}).get("constraints") or ()
+        )
+    }
+    return tuple(
+        text
+        for text in confirmed_decision_texts(stored.get("product"), facts)
+        if text not in carried
+    )
+
+
 def _program_problems(commands, programs: ProgramResolution):
     return tuple(
         Defect(
@@ -4326,6 +4585,11 @@ def _prepare_decoded(
         *(
             _expectation_set_problems(previous, application.action)
             if kind == "expectations"
+            else ()
+        ),
+        *(
+            _expectation_row_problems(previous, decoded.payload)
+            if kind == "expectations" and decoded.outcome == "accepted"
             else ()
         ),
         *(
@@ -4853,6 +5117,7 @@ def inspect_handoff(data: bytes):
             )
         )
     )
+    retired_gaps = _retired_row_gaps(raw.get("acceptance"))
     part_problems = (
         *tuple(
             defect
@@ -4865,6 +5130,7 @@ def inspect_handoff(data: bytes):
                 True,
                 facts._index if isinstance(raw.get("facts"), Record) else None,
             )
+            if defect.what not in retired_gaps
         ),
         *_stored_requirements(raw, facts),
     )

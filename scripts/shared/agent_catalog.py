@@ -271,7 +271,17 @@ def scrub_removed_skill_references(
 
 
 def is_public_command(metadata: dict, public_agents: set[str]) -> bool:
-    """A command is public unless all of its declared agents are non-public."""
+    """A command is public unless it is marked private or all of its declared
+    agents are non-public.
+
+    An explicit ``public: false`` on the command entry makes the command
+    private even when every declared agent is public, so a command can stay
+    private independently of its agent roster. Without the key the agent
+    rule decides exactly as before: a command with no declared agents is
+    public, and a command is public while any declared agent is public.
+    """
+    if metadata.get("public") is False:
+        return False
     agents = metadata.get("agents") or []
     return not agents or any(
         agent.replace("_", "-") in public_agents for agent in agents
@@ -290,6 +300,21 @@ def load_public_commands(nwave_dir: Path) -> set[str]:
         name.replace("_", "-")
         for name, metadata in catalog.get("commands", {}).items()
         if is_public_command(metadata, public_agents)
+    }
+
+
+def load_unlisted_commands(nwave_dir: Path) -> set[str]:
+    """Return catalog command names marked ``listed: false`` (hyphen spelling).
+
+    Such a command is installed like any public command but named by no
+    generated documentation page and by no published listing line. A missing
+    catalog names no command (non-strict, as the documentation callers read it).
+    """
+    catalog = _load_catalog(nwave_dir, strict=False) or {}
+    return {
+        name.replace("_", "-")
+        for name, metadata in catalog.get("commands", {}).items()
+        if metadata.get("listed") is False
     }
 
 

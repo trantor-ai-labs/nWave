@@ -12,7 +12,14 @@ import tempfile
 from pathlib import Path
 
 from nwdes import packets, prose
-from nwdes.contracts import Built, Defect, Refused, checked
+from nwdes.contracts import (
+    DEFAULT_EXAMINE_LEVEL,
+    Built,
+    Defect,
+    Refused,
+    checked,
+    examine_level_named,
+)
 from nwdes.shell.git import failure_reason, run_git, scrubbed_env
 from nwdes.shell.ports import Unreadable
 
@@ -145,13 +152,20 @@ def _declared_status(root, relative):
 
 
 def projection(root):
-    listing = _git(
-        root, ("ls-tree", "-r", "-z", "HEAD", "--", *prose.PUBLIC_PROJECTION[0])
-    )
+    listing = _git(root, ("ls-tree", "-r", "-z", "HEAD"))
     if isinstance(listing, Refused):
         return listing
+    configured = _committed(root, packets.CONFIG_FILE)
+    if isinstance(configured, Refused):
+        return configured
+    declared_public = packets.public_declaration(configured.value)
+    if isinstance(declared_public, Refused):
+        return declared_public
+    entries = packets.public_entries(
+        listing.value, prose.examined_patterns(declared_public.value)
+    )
     files = {}
-    for name, identity in packets.public_entries(listing.value):
+    for name, identity in entries:
         content = _git(root, ("cat-file", "blob", identity))
         if isinstance(content, Refused):
             return content
@@ -162,9 +176,6 @@ def projection(root):
         if isinstance(found, Refused):
             return found
         manifests[name] = found.value
-        if found.value is not None:
-            # the first committed manifest in precedence order decides; a later one is never read
-            break
     common = _git(root, ("rev-parse", "--path-format=absolute", "--git-common-dir"))
     if isinstance(common, Refused):
         return common
@@ -173,7 +184,7 @@ def projection(root):
         path: _declared_status(root, path) for path in packets.required_paths(declared)
     }
     planned = packets.public_projection(
-        listing.value, files, declared, str(root), executables
+        entries, files, declared, str(root), executables
     )
     if isinstance(planned, Refused):
         return planned
@@ -214,18 +225,26 @@ def _enumerate(workspace):
     return tuple(entries)
 
 
+def _real_path(workspace):
+    """The workspace named through the real path of its parent. A link above the workspace, such as the
+    system folder on macOS (/var -> /private/var), is resolved; a link inside the workspace is still seen
+    by the inspection, since only the parent is resolved."""
+    absolute = Path(workspace).absolute()
+    return absolute.parent.resolve() / absolute.name
+
+
 def inspect(projection, workspace, roots):
+    real = _real_path(workspace)
     try:
-        if workspace.is_symlink():
+        if real.is_symlink():
             return checked(
                 None, (packets.workspace_contaminated(("workspace symlink",)),)
             )
         return packets.inspect_workspace(
             projection,
-            str(workspace),
-            str(workspace.resolve()),
+            str(real),
             roots,
-            _enumerate(workspace),
+            _enumerate(real),
         )
     except OSError as error:
         return checked(None, (packets.workspace_contaminated((str(error),)),))
@@ -243,13 +262,26 @@ def _scope_records(records, handoff):
     return sorted(directory.glob(_scope_key(handoff) + "-*.json"))
 
 
-def _record(records, handoff, workspace):
-    """Name the workspace in the checkout's private record directory, so close can find it."""
+def _record(records, handoff, workspace, candidate):
+    """Name the workspace in the checkout's private record directory, so close can find it.
+
+    The record keeps the candidate commit the prompt was built on, so the probe and the close
+    read it later. It holds no time: an examination has no clock.
+    """
     Path(records).mkdir(parents=True, exist_ok=True)
     name = _scope_key(handoff) + "-" + workspace.name + ".json"
-    (Path(records) / name).write_text(
-        json.dumps({"workspace": str(workspace)}), encoding="utf-8"
-    )
+    entry = {"workspace": str(workspace), "candidate": candidate}
+    (Path(records) / name).write_text(json.dumps(entry), encoding="utf-8")
+
+
+def _new_workspace():
+    """A new empty folder for one examination workspace, made in the real system temporary folder.
+
+    A system folder reached through a symbolic link (macOS /var -> /private/var) would name the
+    workspace by a path that is not its real path; the folder is resolved before the workspace is made.
+    """
+    real = Path(tempfile.gettempdir()).resolve()
+    return Path(tempfile.mkdtemp(prefix=WORKSPACE_PREFIX, dir=real))
 
 
 def materialize(root, records, handoff):
@@ -258,12 +290,17 @@ def materialize(root, records, handoff):
     if isinstance(planned, Refused):
         return planned
     public, roots = planned.value
+    head = _git(root, ("rev-parse", "--verify", "HEAD^{commit}"))
+    if isinstance(head, Refused):
+        return head
+    value = head.value
+    candidate = (value.decode("ascii") if isinstance(value, bytes) else value).strip()
     for outcome, path, reason in discard(records, handoff):
         if outcome == "kept":
             sys.stderr.write("\nKEPT " + path + " - " + reason + "\n")
     workspace = None
     try:
-        workspace = Path(tempfile.mkdtemp(prefix=WORKSPACE_PREFIX))
+        workspace = _new_workspace()
         (workspace / "public").mkdir()
         (workspace / "scratch").mkdir()
         for name, content in public.files:
@@ -275,7 +312,7 @@ def materialize(root, records, handoff):
         if isinstance(inspected, Refused):
             shutil.rmtree(workspace)
             return inspected
-        _record(records, handoff, workspace)
+        _record(records, handoff, workspace, candidate)
         return inspected
     except OSError as error:
         if workspace is not None:
@@ -398,9 +435,28 @@ def _read_path(workspace, path):
     )
 
 
+def _start(plan, **placement):
+    """Start the plan's command with its environment and streams captured; placement says how it starts."""
+    return subprocess.run(
+        plan.argv,
+        cwd=plan.cwd,
+        env=dict(plan.environment),
+        capture_output=True,
+        check=False,
+        **placement,
+    )
+
+
+def _pass_through(result, candidate):
+    """Write the child's streams with the candidate path masked, and return its exit status."""
+    sys.stdout.buffer.write(packets.mask_candidate(result.stdout, candidate))
+    sys.stderr.buffer.write(packets.mask_candidate(result.stderr, candidate))
+    return result.returncode
+
+
 def run(root, workspace, action, arguments):
     root = Path(root).resolve()
-    workspace = Path(workspace).absolute()
+    workspace = _real_path(workspace)
     planned = projection(root)
     if isinstance(planned, Refused):
         return planned
@@ -472,13 +528,7 @@ def run(root, workspace, action, arguments):
     if plan.executable is not None:
         return _run_declared(root, plan)
     try:
-        result = subprocess.run(
-            plan.argv,
-            cwd=plan.cwd,
-            env=dict(plan.environment),
-            capture_output=True,
-            check=False,
-        )
+        result = _start(plan)
     except OSError as error:
         return checked(
             None,
@@ -490,29 +540,54 @@ def run(root, workspace, action, arguments):
                 ),
             ),
         )
-    sys.stdout.buffer.write(packets.mask_candidate(result.stdout, plan.candidate))
-    sys.stderr.buffer.write(packets.mask_candidate(result.stderr, plan.candidate))
-    return result.returncode
+    return _pass_through(result, plan.candidate)
 
 
 def _run_declared(root, plan):
     """Run the declared executable that was checked, passing its exit and streams through. The program
-    is started through /dev/fd/N, the very file the descriptor walk checked."""
+    is started through /dev/fd/N, the very file the descriptor walk checked. Where the system refuses
+    that start for permission, the same file is verified again and started by its path; a file that
+    changed or became a link in between is refused and not started."""
+    status, handle = _open_declared(root, plan.executable)
+    if handle is None:
+        return checked(
+            None, (packets.executable_defect(plan.executable, status, plan.remedy),)
+        )
+    first = packets.file_identity(os.fstat(handle))
+    try:
+        result = _start(plan, executable=f"/dev/fd/{handle}", pass_fds=(handle,))
+    except OSError as error:
+        if error.errno not in (errno.EACCES, errno.EPERM):
+            return checked(
+                None,
+                (
+                    packets.executable_launch_failure(
+                        plan.executable, error, plan.remedy
+                    ),
+                ),
+            )
+        return _relaunch_by_path(root, plan, first, error)
+    finally:
+        os.close(handle)
+    return _pass_through(result, plan.candidate)
+
+
+def _relaunch_by_path(root, plan, first, refusal):
+    """Start the declared file by its path, once it is verified again: a regular file with the identity
+    verified before the descriptor start. The outcome line says the launch was by path."""
     status, handle = _open_declared(root, plan.executable)
     if handle is None:
         return checked(
             None, (packets.executable_defect(plan.executable, status, plan.remedy),)
         )
     try:
-        result = subprocess.run(
-            plan.argv,
-            executable=f"/dev/fd/{handle}",
-            pass_fds=(handle,),
-            cwd=plan.cwd,
-            env=dict(plan.environment),
-            capture_output=True,
-            check=False,
-        )
+        if not packets.same_file(first, packets.file_identity(os.fstat(handle))):
+            return checked(
+                None, (packets.executable_changed(plan.executable, plan.remedy),)
+            )
+        sys.stderr.write(packets.launched_by_path_note(plan.executable, refusal))
+        sys.stderr.flush()
+        result = _start(plan, executable=str(Path(root) / plan.executable))
     except OSError as error:
         return checked(
             None,
@@ -520,6 +595,100 @@ def _run_declared(root, plan):
         )
     finally:
         os.close(handle)
-    sys.stdout.buffer.write(packets.mask_candidate(result.stdout, plan.candidate))
-    sys.stderr.buffer.write(packets.mask_candidate(result.stderr, plan.candidate))
-    return result.returncode
+    return _pass_through(result, plan.candidate)
+
+
+def _rounds_path(records, handoff):
+    return Path(records) / (_scope_key(handoff) + ".rounds")
+
+
+def rounds_state(records, handoff):
+    """The scope's rounds record: Built(None) when none is kept, Built(state) when it reads, else Refused."""
+    path = _rounds_path(records, handoff)
+    if not path.is_file():
+        return checked(None, ())
+    try:
+        state = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        state = None
+    if _is_rounds_state(state):
+        return checked(state, ())
+    return checked(
+        None,
+        (
+            Defect(
+                "PartInvalid: examine rounds " + str(path),
+                "the rounds record of this examination scope is damaged, so the examinations "
+                "it counts cannot be read.",
+                "Restore "
+                + str(path)
+                + " from a copy, or ask the owner which round count applies; do not delete it "
+                "to reset the rounds.",
+            ),
+        ),
+    )
+
+
+def _is_rounds_state(state):
+    return (
+        isinstance(state, dict)
+        and set(state) == {"examinations", "last"}
+        and type(state["examinations"]) is int
+        and state["examinations"] >= 0
+        and state["last"] in ("accepted", "rejected", "indeterminate")
+    )
+
+
+def round_refusal(records, handoff, level):
+    """Refuse a new examination once the level's examinations are used up and the last one did not pass."""
+    state = rounds_state(records, handoff)
+    if isinstance(state, Refused):
+        return state
+    if state.value is None:
+        return None
+    name = level or DEFAULT_EXAMINE_LEVEL
+    allowed = 1 + examine_level_named(name).repair_rounds
+    if state.value["last"] == "accepted" or state.value["examinations"] < allowed:
+        return None
+    return checked(
+        None,
+        (
+            Defect(
+                "ExamineRoundsExhausted: level " + name,
+                f"level {name} grants {allowed} examination{'' if allowed == 1 else 's'} "
+                f"and {'it is' if allowed == 1 else 'they are'} used up; "
+                "the cycle does not converge.",
+                "Give each open problem to its owner; for another round choose a longer "
+                "level with nwave-ai rigor --examine-level extended, then examine again.",
+            ),
+        ),
+    )
+
+
+def record_examination(records, handoff, outcome):
+    """Count one published examination of the scope; the record is replaced in one step."""
+    state = rounds_state(records, handoff)
+    if isinstance(state, Refused):
+        return state
+    count = 0 if state.value is None else state.value["examinations"]
+    path = _rounds_path(records, handoff)
+    Path(records).mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + ".tmp")
+    temporary.write_text(
+        json.dumps({"examinations": count + 1, "last": outcome}), encoding="utf-8"
+    )
+    temporary.replace(path)
+    return checked(None, ())
+
+
+def stale_candidates(records, handoff, head):
+    """The candidate commits the scope's prompts recorded that differ from HEAD now."""
+    found = []
+    for record in _scope_records(records, handoff):
+        try:
+            candidate = json.loads(record.read_text(encoding="utf-8")).get("candidate")
+        except (OSError, ValueError):
+            continue
+        if candidate is not None and candidate != head:
+            found.append(candidate)
+    return found
