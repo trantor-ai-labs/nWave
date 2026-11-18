@@ -23,6 +23,7 @@ Each wave emits a single `feature-delta.md` whose headings are typed `[REF]` (al
 Before emitting any Tier-1 section, resolve the active documentation density:
 
 1. **Read** `~/.nwave/global-config.json`. Treat missing/malformed config as empty dict (fall back to defaults).
+   Then **read** the project's `.nwave/des-config.json` (missing/malformed = empty dict). A top-level `documentation` or `rigor` key set there replaces the global one, key by key, before the cascade runs (`merge_project_config` in `scripts/shared/density_config.py`). This lets one project run lean without touching a person's global setting.
 2. **Call** `resolve_density(global_config)` from `scripts/shared/density_config.py`. The function returns a `Density` value object with fields `mode` (`"lean"` | `"full"`), `expansion_prompt` (`"ask"` | `"ask-intelligent"` | `"always-skip"` | `"always-expand"` | `"smart"`), and `provenance` (the cascade branch that produced this result).
 3. **Branch on `density.mode`**:
    - `lean` → emit ONLY Tier-1 `[REF]` sections. Do NOT auto-render Tier-2 items.

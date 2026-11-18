@@ -51,7 +51,7 @@ Rendered under `## Wave: DISCUSS / [WHY|HOW] <Section>` only when requested via 
 
 ## Density resolution (per D12)
 
-Call `resolve_density(global_config)` from `scripts/shared/density_config.py` after reading `~/.nwave/global-config.json` (missing/malformed = empty dict). Returns `mode` (`"lean"` | `"full"`) + `expansion_prompt` (`"ask"` | `"ask-intelligent"` | `"always-skip"` | `"always-expand"` | `"smart"`) per the D12 cascade (resolver-internal, DDD-5 — do NOT replicate locally). DISCUSS hard default is `lean`+`ask-intelligent` per Decision 4 (2026-04-28). Branch on `density.mode` (lean = Tier-1 only; full = Tier-1 + all Tier-2) and at wave end on `density.expansion_prompt`. Full cascade detail, branch semantics, ad-hoc override workflow: `nWave/skills/nw-density-resolution-contract/SKILL.md`.
+Call `resolve_density(global_config)` from `scripts/shared/density_config.py` after reading `~/.nwave/global-config.json` (missing/malformed = empty dict) and then laying the project's `.nwave/des-config.json` over it: a `documentation` or `rigor` key set there replaces the global one (see `nw-density-resolution-contract`). Returns `mode` (`"lean"` | `"full"`) + `expansion_prompt` (`"ask"` | `"ask-intelligent"` | `"always-skip"` | `"always-expand"` | `"smart"`) per the D12 cascade (resolver-internal, DDD-5 — do NOT replicate locally). DISCUSS hard default is `lean`+`ask-intelligent` per Decision 4 (2026-04-28). Branch on `density.mode` (lean = Tier-1 only; full = Tier-1 + all Tier-2) and at wave end on `density.expansion_prompt`. Full cascade detail, branch semantics, ad-hoc override workflow: `nWave/skills/nw-density-resolution-contract/SKILL.md`.
 
 ### Trigger detection (`ask-intelligent` mode, per Decision 4)
 

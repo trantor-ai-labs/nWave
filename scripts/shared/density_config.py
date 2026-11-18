@@ -159,3 +159,20 @@ def resolve_density(global_config: dict[str, Any]) -> Density:
             "explicit_override" if explicit_mode is not None else inherited.provenance
         ),
     )
+
+
+def merge_project_config(
+    global_config: dict[str, Any], project_config: dict[str, Any]
+) -> dict[str, Any]:
+    """Lay a project's `.nwave/des-config.json` over the global config.
+
+    Pure function. A top-level `documentation` or `rigor` key in the project
+    config replaces the global one; every other global key is kept. Pass the
+    result to `resolve_density`.
+    """
+    merged = dict(global_config)
+    for key in ("documentation", "rigor"):
+        value = project_config.get(key)
+        if isinstance(value, dict):
+            merged[key] = value
+    return merged

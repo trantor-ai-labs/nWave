@@ -1,0 +1,12 @@
+#!/usr/bin/env python3
+"""des-verify-integrity: nWave DES command, shipped in the plugin's bin/ so it is on the Bash PATH."""
+import os
+import runpy
+import sys
+
+scripts_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts")
+if scripts_dir not in sys.path:
+    sys.path.insert(0, scripts_dir)
+
+sys.argv[0] = "des-verify-integrity"
+runpy.run_module("des.cli.verify_deliver_integrity", run_name="__main__")

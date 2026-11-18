@@ -1,6 +1,5 @@
 ---
 description: "Creates a phased roadmap.json for a feature goal with acceptance criteria and TDD steps. Use when planning implementation steps before execution."
-disable-model-invocation: true
 argument-hint: '[agent] [goal-description] - Example: @solution-architect "Migrate to microservices"'
 ---
 

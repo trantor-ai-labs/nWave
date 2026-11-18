@@ -140,6 +140,7 @@ def _cmd_init(args: list[str]) -> int:
     json_output = json.dumps(skeleton, indent=2)
 
     if output_path:
+        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
         Path(output_path).write_text(json_output, encoding="utf-8")
         print(f"Roadmap skeleton written to {output_path}")
     else:

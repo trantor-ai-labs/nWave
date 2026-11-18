@@ -667,6 +667,43 @@ def generate_hook_wrapper(plugin_dir: Path) -> StepResult:
     return StepResult.ok("hook_wrapper", 1)
 
 
+_DES_CLI_MODULES = {
+    "des-roadmap": "des.cli.roadmap",
+    "des-init-log": "des.cli.init_log",
+    "des-log-phase": "des.cli.log_phase",
+    "des-commit": "des.cli.commit",
+    "des-verify-integrity": "des.cli.verify_deliver_integrity",
+}
+
+_DES_CLI_WRAPPER_TEMPLATE = """\
+#!/usr/bin/env python3
+\"\"\"{name}: nWave DES command, shipped in the plugin's bin/ so it is on the Bash PATH.\"\"\"
+import os
+import runpy
+import sys
+
+scripts_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts")
+if scripts_dir not in sys.path:
+    sys.path.insert(0, scripts_dir)
+
+sys.argv[0] = "{name}"
+runpy.run_module("{module}", run_name="__main__")
+"""
+
+
+def generate_des_cli_wrappers(plugin_dir: Path) -> StepResult:
+    """Generate bin/des-* wrappers so the commands' `des-roadmap` and friends resolve."""
+    bin_dir = plugin_dir / "bin"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    for name, module in _DES_CLI_MODULES.items():
+        path = bin_dir / name
+        path.write_text(
+            _DES_CLI_WRAPPER_TEMPLATE.format(name=name, module=module), encoding="utf-8"
+        )
+        path.chmod(path.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+    return StepResult.ok("des_cli_wrappers", len(_DES_CLI_MODULES))
+
+
 def write_metadata(plugin_dir: Path, metadata: dict) -> StepResult:
     """Write plugin.json metadata to the .claude-plugin directory."""
     metadata_dir = plugin_dir / ".claude-plugin"
@@ -813,8 +850,11 @@ def build(config: BuildConfig, *, version_override: str | None = None) -> BuildR
     wrapper_result = generate_hook_wrapper(plugin_dir)
     steps.append(wrapper_result)
 
-    # Step 11: Generate and write metadata
-    metadata = generate_plugin_metadata(config.plugin_name)
+    # Step 10b: DES command wrappers on the Bash PATH (bin/)
+    steps.append(generate_des_cli_wrappers(plugin_dir))
+
+    # Step 11: Generate and write metadata (with the version, so dependents can pin it)
+    metadata = {**generate_plugin_metadata(config.plugin_name), "version": version}
     metadata_result = write_metadata(plugin_dir, metadata)
     steps.append(metadata_result)
 
